@@ -11,6 +11,7 @@ library(prettymapr)
 library(readxl)
 library(tidyr)
 library(openxlsx)
+library(officer)
 
 # cache en disco
 shinyOptions(cache = cachem::cache_disk("cache"))
@@ -145,7 +146,8 @@ ui <- page_fluid(
       div(
         style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;",
         actionButton("generar_tablas", "Generar tablas", class = "btn btn-success btn-sm"),
-        downloadButton("descargar_tablas", "Descargar Excel", class = "btn btn-sm btn-custom-download")
+        downloadButton("descargar_tablas", "Descargar Excel", class = "btn btn-sm btn-custom-download"),
+        downloadButton("descargar_word", "Descargar Word", class = "btn btn-sm btn-custom-download")
       ),
       
       uiOutput("estado_tablas")
@@ -197,6 +199,52 @@ server <- function(input, output, session) {
     })
     
     tablas
+  }
+
+  build_tablas_word_from_excel <- function(path_excel, sheet_base = "tablas", sheet_word = "tablas_word") {
+    hojas <- readxl::excel_sheets(path_excel)
+
+    if (sheet_word %in% hojas) {
+      return(build_tablas_from_excel(path_excel, sheet = sheet_word))
+    }
+
+    cfg <- readxl::read_excel(path_excel, sheet = sheet_base) |>
+      rename_with(toupper)
+
+    posibles_flags <- c("INCLUIR_WORD", "WORD", "EXPORTAR_WORD", "EN_WORD")
+    col_flag <- intersect(posibles_flags, names(cfg))
+
+    validate(need(length(col_flag) > 0,
+                  "Config Word: agrega hoja 'tablas_word' o columna INCLUIR_WORD/WORD/EXPORTAR_WORD/EN_WORD en hoja 'tablas'."))
+
+    flag_name <- col_flag[[1]]
+
+    cfg_word <- cfg |>
+      mutate(
+        .flag_raw = as.character(.data[[flag_name]]),
+        .flag = toupper(trimws(.flag_raw))
+      ) |>
+      filter(.flag %in% c("1", "TRUE", "T", "SI", "SÍ", "S", "YES", "Y", "X")) |>
+      select(any_of(c("TABLA", "COL", "LABEL", "ORDEN")))
+
+    validate(need(nrow(cfg_word) > 0,
+                  "Config Word: no hay filas marcadas para Word en el Excel."))
+
+    tabla_seq <- cfg_word |>
+      mutate(.row = dplyr::row_number(), ORDEN = suppressWarnings(as.integer(ORDEN))) |>
+      group_by(TABLA) |>
+      summarise(.first = min(.row), .groups = "drop") |>
+      arrange(.first)
+
+    cfg_sorted <- cfg_word |>
+      mutate(.row = dplyr::row_number(), ORDEN = suppressWarnings(as.integer(ORDEN))) |>
+      left_join(tabla_seq, by = "TABLA") |>
+      arrange(.first, ORDEN, .row)
+
+    split_cfg <- lapply(tabla_seq$TABLA, function(t) dplyr::filter(cfg_sorted, TABLA == t))
+    names(split_cfg) <- tabla_seq$TABLA
+
+    lapply(split_cfg, function(d) list(cols = d$COL, labels = d$LABEL))
   }
   
   
@@ -440,6 +488,70 @@ server <- function(input, output, session) {
       openxlsx::setColWidths(wb, g, 5, 26)     # Valor (texto)
     }
   }
+
+  generar_parrafo_linea_base <- function(grupo, proporciones_df) {
+    props_txt <- proporciones_df |>
+      mutate(
+        detalle = ifelse(
+          is.na(Porcentaje),
+          paste0(Indicador, ": ", Valor),
+          paste0(
+            Indicador, ": ",
+            Numerador, " de ", Denominador,
+            " (", formatC(Porcentaje, format = "f", digits = 2), "%)"
+          )
+        )
+      ) |>
+      pull(detalle)
+
+    if (length(props_txt) == 0) {
+      return(paste0(
+        "Para el grupo ", grupo,
+        ", no se identificaron antecedentes suficientes para construir una lectura cuantitativa consolidada. ",
+        "Se recomienda complementar con revisión territorial y participación temprana para robustecer la línea de base humana."
+      ))
+    }
+
+    paste0(
+      "Para el grupo ", grupo,
+      ", la lectura de línea base de medio humano considera el conjunto completo de indicadores disponibles: ",
+      paste(props_txt, collapse = "; "),
+      ". En su conjunto, estos antecedentes orientan la evaluación ambiental respecto de condiciones de vulnerabilidad, acceso a servicios y prioridades de gestión territorial en el contexto del SEIA en Chile."
+    )
+  }
+
+  exportar_tablas_word <- function(file, tablas_por_grupo, proporciones_por_grupo) {
+    doc <- officer::read_docx()
+
+    doc <- officer::body_add_par(doc, "Línea de Base de Medio Humano - Censo 2024", style = "heading 1")
+    doc <- officer::body_add_par(
+      doc,
+      "Documento generado automáticamente con tablas de frecuencias y proporciones para apoyo a evaluación ambiental en Chile.",
+      style = "Normal"
+    )
+
+    for (g in names(tablas_por_grupo)) {
+      doc <- officer::body_add_par(doc, "", style = "Normal")
+      doc <- officer::body_add_par(doc, paste0("Grupo: ", g), style = "heading 2")
+
+      prop_df <- proporciones_por_grupo[[g]] |>
+        select(Indicador, Numerador, Denominador, Porcentaje, Valor)
+
+      lectura <- generar_parrafo_linea_base(g, prop_df)
+      doc <- officer::body_add_par(doc, lectura, style = "Normal")
+
+      doc <- officer::body_add_par(doc, "Proporciones", style = "heading 3")
+      doc <- officer::body_add_table(doc, value = prop_df, style = "Table Grid")
+
+      for (nombre_tabla in names(tablas_por_grupo[[g]])) {
+        tab <- tablas_por_grupo[[g]][[nombre_tabla]]
+        doc <- officer::body_add_par(doc, nombre_tabla, style = "heading 3")
+        doc <- officer::body_add_table(doc, value = tab, style = "Table Grid")
+      }
+    }
+
+    print(doc, target = file)
+  }
   
   # --------------------------
   # Map selection state
@@ -590,6 +702,10 @@ server <- function(input, output, session) {
   TABLAS <- reactive({
     build_tablas_from_excel("config_tablas_censo2024.xlsx", sheet = "tablas")
   })
+
+  TABLAS_WORD <- reactive({
+    build_tablas_word_from_excel("config_tablas_censo2024.xlsx", sheet_base = "tablas", sheet_word = "tablas_word")
+  })
   
   codigos_usuario <- reactive({
     req(input$excel_codigos)
@@ -622,11 +738,13 @@ server <- function(input, output, session) {
     
     cod <- codigos_usuario()
     tablas_cfg <- TABLAS()
+    tablas_word_cfg <- TABLAS_WORD()
     cols_tablas <- unique(unlist(lapply(tablas_cfg, function(x) x$cols)))
+    cols_tablas_word <- unique(unlist(lapply(tablas_word_cfg, function(x) x$cols)))
     cols_props  <- unique(unlist(lapply(PROPORCIONES, function(p) c(p$num_cols, p$den_cols))))
     
     
-    cols_needed_num <- unique(c(cols_tablas, cols_props, "n_per"))
+    cols_needed_num <- unique(c(cols_tablas, cols_tablas_word, cols_props, "n_per"))
     
     cod <- cod |>
       mutate(
@@ -680,6 +798,10 @@ server <- function(input, output, session) {
   proporciones_generadas <- eventReactive(input$generar_tablas, {
     make_proporciones_por_grupo(datos_para_tablas(), PROPORCIONES, dec = 2)
   })
+
+  tablas_word_generadas <- eventReactive(input$generar_tablas, {
+    generar_tablas_baseline(datos_para_tablas(), TABLAS_WORD())
+  })
   
   output$estado_tablas <- renderUI({
     req(input$generar_tablas)
@@ -713,6 +835,15 @@ server <- function(input, output, session) {
       exportar_tablas_excel_into_wb(wb, tablas_generadas(), proporciones_generadas())
       
       openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+    }
+  )
+
+  output$descargar_word <- downloadHandler(
+    filename = function() {
+      paste0("linea_base_medio_humano_", format(Sys.Date(), "%Y%m%d"), ".docx")
+    },
+    content = function(file) {
+      exportar_tablas_word(file, tablas_word_generadas(), proporciones_generadas())
     }
   )
 }
