@@ -1,0 +1,68 @@
+h3 {
+  font-weight: 800 !important;
+}
+
+p {
+  margin-bottom: 0.6rem;
+  line-height: 1.3;
+}
+
+.control-label {
+  color: #666666;
+  font-weight: 600;
+}
+    
+.selectize-input {
+  border: solid 1px #444444;
+}
+
+text {
+     font-family: Inter, helvetica, arial, sans-serf;
+}
+
+.azar {
+  text-align: right; margin-top: -8px;
+}
+
+.explicacion {
+  color: #666666; 
+  text-align: right;
+  line-height: 1.1 !important;
+}
+
+.id_variable {
+  font-family: Menlo, Courier, monospaced;
+}
+
+/* color de íconos de toolbar de ggiraph */
+.ggiraph-toolbar-icon.neutral {
+  stroke: #3C533C;
+  fill: #3C533C;
+}
+
+/* color de fondo de toolbar de ggiraph */
+.ggiraph-toolbar {
+  background-color: #181818;
+}
+
+.btn-custom-clear {
+  background-color: #3C533C;
+  color: #ffffff;
+  border: none;
+}
+
+.btn-custom-clear:hover {
+  background-color: #4f6b4f;
+  color: #ffffff;
+}
+
+.btn-custom-download {
+  background-color: #3C533C;
+  color: #ffffff;
+  border: none;
+}
+
+.btn-custom-download:hover {
+  background-color: #4f6b4f;
+  color: #ffffff;
+}
