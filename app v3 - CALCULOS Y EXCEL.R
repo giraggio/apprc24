@@ -146,8 +146,7 @@ ui <- page_fluid(
       div(
         style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;",
         actionButton("generar_tablas", "Generar tablas", class = "btn btn-success btn-sm"),
-        downloadButton("descargar_tablas", "Descargar Excel", class = "btn btn-sm btn-custom-download"),
-        downloadButton("descargar_word", "Descargar Word", class = "btn btn-sm btn-custom-download")
+        uiOutput("descargas_disponibles")
       ),
       
       uiOutput("estado_tablas")
@@ -814,6 +813,16 @@ server <- function(input, output, session) {
     }
     
     div(style="margin-top:10px; color:#bbb;", msg)
+  })
+
+  output$descargas_disponibles <- renderUI({
+    req(input$generar_tablas > 0)
+    req(tablas_generadas(), proporciones_generadas(), tablas_word_generadas())
+
+    tagList(
+      downloadButton("descargar_tablas", "Descargar Excel", class = "btn btn-sm btn-custom-download"),
+      downloadButton("descargar_word", "Descargar Word", class = "btn btn-sm btn-custom-download")
+    )
   })
   
   output$descargar_tablas <- downloadHandler(
